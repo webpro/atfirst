@@ -283,32 +283,34 @@ async function fetchFeed(handle: string): Promise<FeedItem[]> {
   }
   if (!records.length) throw new Error("No posts found")
 
-  // 3. Hydrate with getPosts for full views (embeds, counts, avatars)
+  // 3. Hydrate posts + parent posts in parallel
   const uris = records.map((r) => r.uri)
-  const postsRes = await fetch(
-    `${API}/app.bsky.feed.getPosts?` + uris.map((u) => `uris=${encodeURIComponent(u)}`).join("&"),
-  )
+  const uriSet = new Set(uris)
+  const parentUris = [...new Set(
+    records.map((r) => r.value.reply?.parent.uri).filter((u): u is string => !!u && !uriSet.has(u)),
+  )]
+
+  const postsQuery = `${API}/app.bsky.feed.getPosts?` + uris.map((u) => `uris=${encodeURIComponent(u)}`).join("&")
+  const parentQuery = parentUris.length
+    ? `${API}/app.bsky.feed.getPosts?` + parentUris.map((u) => `uris=${encodeURIComponent(u)}`).join("&")
+    : null
+
+  const [postsRes, parRes] = await Promise.all([
+    fetch(postsQuery),
+    parentQuery ? fetch(parentQuery) : null,
+  ])
+
   if (!postsRes.ok) throw new Error(`API error ${postsRes.status}`)
   const postsData = (await postsRes.json()) as { posts: PostView[] }
-
   const postMap = new Map(postsData.posts.map((p) => [p.uri, p]))
 
-  // 4. Fetch parent posts for replies
-  const parentUris = postsData.posts
-    .map((p) => p.record.reply?.parent.uri)
-    .filter((u): u is string => !!u && !postMap.has(u))
   const parentMap = new Map<string, PostView>()
-  if (parentUris.length) {
-    const parRes = await fetch(
-      `${API}/app.bsky.feed.getPosts?` + parentUris.map((u) => `uris=${encodeURIComponent(u)}`).join("&"),
-    )
-    if (parRes.ok) {
-      const parData = (await parRes.json()) as { posts: PostView[] }
-      for (const p of parData.posts) parentMap.set(p.uri, p)
-    }
+  if (parRes?.ok) {
+    const parData = (await parRes.json()) as { posts: PostView[] }
+    for (const p of parData.posts) parentMap.set(p.uri, p)
   }
 
-  // 5. Build feed items in original (oldest-first) order
+  // 4. Build feed items in original (oldest-first) order
   const items: FeedItem[] = []
   for (const uri of uris) {
     const post = postMap.get(uri)
