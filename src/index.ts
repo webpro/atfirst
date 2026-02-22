@@ -229,12 +229,12 @@ form{margin-bottom:1.5rem}
 input{width:100%;padding:.5rem;border:1px solid var(--input-border);border-radius:6px;font-size:1rem;background:var(--card);color:var(--fg)}
 .tag{color:var(--link)}`
 
-function page(title: string, content: string): Response {
-  const html =
+function pageHead(title: string): string {
+  return (
     `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` +
     `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-    `<title>${esc(title)}</title><style>${CSS}</style></head><body>${content}</body></html>`
-  return new Response(html, { headers: { "content-type": "text/html;charset=UTF-8" } })
+    `<title>${esc(title)}</title><style>${CSS}</style></head><body>`
+  )
 }
 
 // --- Worker ---
@@ -334,21 +334,36 @@ export default {
       return Response.redirect(new URL(`/${actor}`, url.origin).href, 302)
     }
 
-    let feedHtml = ""
-    if (actor) {
-      try {
-        const items = await fetchFeed(actor)
-        feedHtml = items.map(renderPost).join("") || "<p>No posts found.</p>"
-      } catch (err) {
-        feedHtml = `<p class="error">${esc(err instanceof Error ? err.message : "Unknown error")}</p>`
-      }
-    }
+    const encoder = new TextEncoder()
+    const { readable, writable } = new TransformStream()
+    const writer = writable.getWriter()
 
-    return page(
-      actor ? `@${actor} - at first` : "at first",
-      `<h1>at first</h1>` +
-        `<form><input name="actor" placeholder="handle.bsky.social" value="${esc(actor || "")}" aria-label="Bluesky handle" required></form>` +
-        feedHtml,
-    )
+    const write = (s: string) => writer.write(encoder.encode(s))
+
+    ;(async () => {
+      await write(
+        pageHead(actor ? `@${actor} - at first` : "at first") +
+        `<h1>at first</h1>` +
+        `<form><input name="actor" placeholder="handle.bsky.social" value="${esc(actor || "")}" aria-label="Bluesky handle" required></form>`,
+      )
+
+      if (actor) {
+        try {
+          const items = await fetchFeed(actor)
+          if (items.length) {
+            for (const item of items) await write(renderPost(item))
+          } else {
+            await write("<p>No posts found.</p>")
+          }
+        } catch (err) {
+          await write(`<p class="error">${esc(err instanceof Error ? err.message : "Unknown error")}</p>`)
+        }
+      }
+
+      await write("</body></html>")
+      await writer.close()
+    })()
+
+    return new Response(readable, { headers: { "content-type": "text/html;charset=UTF-8" } })
   },
 } satisfies ExportedHandler
