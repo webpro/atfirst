@@ -1,0 +1,7 @@
+name = "atfirst"
+main = "src/index.ts"
+compatibility_date = "2026-02-22"
+
+[[routes]]
+pattern = "atfirst.blue"
+custom_domain = true
