@@ -1,4 +1,4 @@
-import { resolveHandle, describeRepo, listRecords, type RawRecord } from "./feed.ts"
+import { resolveIdentity, describeRepo, listRecords, type RawRecord } from "./feed.ts"
 import { esc, pageHead, renderItem, genericView, type ItemView } from "./render.ts"
 import * as bskyPost from "./collections/bsky-post.ts"
 import * as whitewindBlog from "./collections/whitewind-blog.ts"
@@ -83,7 +83,7 @@ export default {
 
     if (actor) {
       try {
-        const { did, pds } = await resolveHandle(actor)
+        const { did, pds } = await resolveIdentity(actor)
         const repoCollections = new Set(await describeRepo(did, pds))
 
         html += renderForm(actor, collectionId, repoCollections)

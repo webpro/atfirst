@@ -5,11 +5,7 @@ export interface RawRecord {
   value: Record<string, unknown>
 }
 
-export async function resolveHandle(handle: string): Promise<{ did: string; pds: string }> {
-  const idRes = await fetch(`${BSKY_API}/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`)
-  if (!idRes.ok) throw new Error("Could not resolve handle")
-  const { did } = (await idRes.json()) as { did: string }
-
+async function resolvePds(did: string): Promise<string> {
   const plcRes = await fetch(`https://plc.directory/${did}`)
   if (!plcRes.ok) throw new Error("Could not resolve DID")
   const didDoc = (await plcRes.json()) as {
@@ -17,8 +13,17 @@ export async function resolveHandle(handle: string): Promise<{ did: string; pds:
   }
   const pds = didDoc.service.find((s) => s.id === "#atproto_pds")?.serviceEndpoint
   if (!pds) throw new Error("No PDS found")
+  return pds
+}
 
-  return { did, pds }
+export async function resolveIdentity(actor: string): Promise<{ did: string; pds: string }> {
+  if (actor.startsWith("did:")) {
+    return { did: actor, pds: await resolvePds(actor) }
+  }
+  const idRes = await fetch(`${BSKY_API}/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(actor)}`)
+  if (!idRes.ok) throw new Error("Could not resolve handle")
+  const { did } = (await idRes.json()) as { did: string }
+  return { did, pds: await resolvePds(did) }
 }
 
 export async function describeRepo(did: string, pds: string): Promise<string[]> {
