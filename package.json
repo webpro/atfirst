@@ -6,8 +6,14 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260228.0",
+    "@cloudflare/workers-types": "^4.20260302.0",
     "wrangler": "^4"
+  },
+  "dependencies": {
+    "hast-util-to-html": "^9.0.5",
+    "hast-util-truncate": "^2.0.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "mdast-util-to-hast": "^13.2.1"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
