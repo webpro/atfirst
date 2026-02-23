@@ -5,3 +5,7 @@ compatibility_date = "2026-02-22"
 [[routes]]
 pattern = "atfirst.blue"
 custom_domain = true
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "4846927e8d894242932821593d5386a7"

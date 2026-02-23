@@ -6,6 +6,10 @@ import * as frontpagePost from "./collections/frontpage-post.ts"
 import * as pskyPost from "./collections/psky-post.ts"
 import * as leafletDocument from "./collections/leaflet-document.ts"
 
+interface Env {
+  CACHE: KVNamespace
+}
+
 interface Collection {
   id: string
   label: string
@@ -14,6 +18,7 @@ interface Collection {
   viewAll(records: RawRecord[], actor: string, pds: string): ItemView[] | Promise<ItemView[]>
 }
 
+const LIMIT = 10
 const COLLECTIONS: Collection[] = [
   bskyPost,
   frontpagePost,
@@ -41,8 +46,10 @@ function renderForm(actor: string, collectionId: string, repoCollections?: Set<s
   )
 }
 
+const HTML_HEADERS = { "content-type": "text/html;charset=UTF-8" }
+
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     const parts = url.pathname.slice(1).split("/").filter(Boolean)
     const rawActor = url.searchParams.get("actor")?.trim().replace(/^@/, "")
@@ -67,50 +74,48 @@ export default {
     }
 
     const collection = collectionMap.get(collectionId)
-    const encoder = new TextEncoder()
-    const { readable, writable } = new TransformStream()
-    const writer = writable.getWriter()
-    const write = (s: string) => writer.write(encoder.encode(s))
-
     const collectionLabel = collectionId !== DEFAULT_COLLECTION
       ? ` (${collection?.label || collectionId})`
       : ""
 
-    ;(async () => {
-      await write(
-        pageHead(actor ? `@${actor}${esc(collectionLabel)} - at first` : "at first") +
-        `<h1>at first</h1>`,
-      )
+    let html = pageHead(actor ? `@${actor}${esc(collectionLabel)} - at first` : "at first") +
+      `<h1>at first</h1>`
 
-      if (actor) {
-        try {
-          const { did, pds } = await resolveHandle(actor)
-          const repoCollections = new Set(await describeRepo(did, pds))
+    if (actor) {
+      try {
+        const { did, pds } = await resolveHandle(actor)
+        const repoCollections = new Set(await describeRepo(did, pds))
 
-          await write(renderForm(actor, collectionId, repoCollections))
+        html += renderForm(actor, collectionId, repoCollections)
 
-          const records = collection?.fetchRecords
-            ? await collection.fetchRecords(did, pds, 10)
-            : await listRecords(did, pds, collectionId, 10, collection?.reverse)
-          if (!records.length) {
-            await write("<p>No records found.</p>")
-          } else {
-            const viewAll = collection?.viewAll ?? defaultViewAll
-            const views = await viewAll(records, actor, pds)
-            for (const view of views) await write(renderItem(view))
-          }
-        } catch (err) {
-          await write(renderForm(actor, collectionId))
-          await write(`<p class="error">${esc(err instanceof Error ? err.message : "Unknown error")}</p>`)
+        const cacheKey = `${did}/${collectionId}`
+        const cached = await env.CACHE.get<RawRecord[]>(cacheKey, "json")
+        const records = cached
+          ?? (collection?.fetchRecords
+            ? await collection.fetchRecords(did, pds, LIMIT)
+            : await listRecords(did, pds, collectionId, LIMIT, collection?.reverse))
+
+        if (!cached && records.length >= LIMIT) {
+          ctx.waitUntil(env.CACHE.put(cacheKey, JSON.stringify(records)))
         }
-      } else {
-        await write(renderForm("", collectionId))
+
+        if (!records.length) {
+          html += "<p>No records found.</p>"
+        } else {
+          const viewAll = collection?.viewAll ?? defaultViewAll
+          const views = await viewAll(records, actor, pds)
+          for (const view of views) html += renderItem(view)
+        }
+      } catch (err) {
+        html += renderForm(actor, collectionId)
+        html += `<p class="error">${esc(err instanceof Error ? err.message : "Unknown error")}</p>`
       }
+    } else {
+      html += renderForm("", collectionId)
+    }
 
-      await write("</body></html>")
-      await writer.close()
-    })()
+    html += "</body></html>"
 
-    return new Response(readable, { headers: { "content-type": "text/html;charset=UTF-8" } })
+    return new Response(html, { headers: HTML_HEADERS })
   },
-} satisfies ExportedHandler
+} satisfies ExportedHandler<Env>
